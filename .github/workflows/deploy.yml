@@ -1,0 +1,41 @@
+name: Deploy Backend to AWS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t premraj01/backend-app:latest .
+          docker push premraj01/backend-app:latest
+
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull premraj01/backend-app:latest
+            docker stop hrms-backend || true
+            docker rm hrms-backend || true
+            docker run -d \
+              --name hrms-backend \
+              -p 3001:3000 \
+              --env-file /home/ubuntu/hrms/.env \
+              premraj01/backend-app:latest
