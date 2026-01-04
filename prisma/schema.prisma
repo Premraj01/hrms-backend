@@ -1,0 +1,769 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTHENTICATION & AUTHORIZATION MODELS
+// ============================================
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system") // System roles cannot be deleted
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  employeeRoles EmployeeRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+  @@index([name])
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g., "employees.create", "payroll.view"
+  resource    String   // e.g., "employees", "payroll", "departments"
+  action      String   // e.g., "create", "read", "update", "delete"
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+  @@unique([resource, action])
+  @@index([resource])
+  @@index([action])
+}
+
+model EmployeeRole {
+  id         String   @id @default(uuid())
+  employeeId String   @map("employee_id")
+  roleId     String   @map("role_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  role     Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, roleId])
+  @@map("employee_roles")
+  @@index([employeeId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  employeeId String    @map("employee_id")
+  token      String    @unique
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  revokedAt  DateTime? @map("revoked_at")
+  replacedBy String?   @map("replaced_by")
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+  @@index([employeeId])
+  @@index([token])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  employeeId String?  @map("employee_id")
+  action     String   // e.g., "LOGIN", "CREATE_EMPLOYEE", "UPDATE_PAYROLL"
+  resource   String?  // e.g., "employees", "payroll"
+  resourceId String?  @map("resource_id")
+  details    Json?    // Additional details about the action
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+  @@index([employeeId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+}
+
+// ============================================
+// EMPLOYEE MANAGEMENT MODELS
+// ============================================
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  employees Employee[]
+
+  @@map("departments")
+  @@index([name])
+  @@index([code])
+}
+
+model Designation {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  level       Int?     // Hierarchy level (e.g., 1 for entry, 5 for senior)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  employees Employee[]
+
+  @@map("designations")
+  @@index([name])
+  @@index([code])
+  @@index([level])
+}
+
+model Employee {
+  id                String    @id @default(uuid())
+  firstName         String    @map("first_name")
+  middleName        String?   @map("middle_name")
+  lastName          String    @map("last_name")
+  personalEmail     String?   @map("personal_email")
+  officeEmail       String    @unique @map("office_email")
+  phone             String?
+
+  // Authentication fields
+  password                String
+  isActive                Boolean   @default(true) @map("is_active")
+  isEmailVerified         Boolean   @default(false) @map("is_email_verified")
+  emailVerificationToken  String?   @map("email_verification_token")
+  passwordResetToken      String?   @map("password_reset_token")
+  passwordResetExpires    DateTime? @map("password_reset_expires")
+  lastLogin               DateTime? @map("last_login")
+
+  // Employee fields
+  joiningDate       DateTime  @map("joining_date")
+  designationId     String?   @map("designation_id")
+  departmentId      String?   @map("department_id")
+  reportingManager  String?   @map("reporting_manager") // Employee ID of manager
+  employeeCode      String?   @unique @map("employee_code")
+  employmentType    String?   @map("employment_type") // Full-time, Part-time, Contract
+  status            String    @default("active") // active, inactive, terminated
+  dateOfBirth       DateTime? @map("date_of_birth")
+  address           String?
+  city              String?
+  state             String?
+  country           String?
+  postalCode        String?   @map("postal_code")
+  emergencyContact  String?   @map("emergency_contact")
+  emergencyPhone    String?   @map("emergency_phone")
+  profilePhoto      String?   @map("profile_photo") // URL or path to profile photo
+
+  // Social Media Links
+  linkedIn          String?   @map("linkedin")
+  github            String?   @map("github")
+  portfolio         String?   @map("portfolio")
+
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  // Relations
+  department     Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  designation    Designation?     @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  manager        Employee?        @relation("EmployeeHierarchy", fields: [reportingManager], references: [id], onDelete: SetNull)
+  subordinates   Employee[]       @relation("EmployeeHierarchy")
+  employeeRoles  EmployeeRole[]
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+  leaves         Leave[]          @relation("EmployeeLeaves")
+  approvedLeaves Leave[]          @relation("ApprovedByEmployee")
+  leaveBalances  LeaveBalance[]   @relation("EmployeeLeaveBalances")
+  projectMembers  ProjectMember[]
+  createdEvents   Event[]          @relation("EventCreator")
+  createdHolidays Holiday[]        @relation("HolidayCreator")
+  createdPolicies Policy[]         @relation("PolicyCreator")
+  documents       EmployeeDocument[] @relation("EmployeeDocuments")
+  uploadedDocuments EmployeeDocument[] @relation("DocumentUploader")
+  postedJobs      JobOpening[]     @relation("JobPoster")
+  referrals       JobReferral[]    @relation("Referrer")
+  createdOffers   CandidateOffer[] @relation("OfferCreator")
+  revokedOffers   CandidateOffer[] @relation("OfferRevoker")
+
+  @@map("employees")
+  @@index([employeeCode])
+  @@index([officeEmail])
+  @@index([departmentId])
+  @@index([designationId])
+  @@index([reportingManager])
+  @@index([status])
+}
+
+// ============================================
+// LEAVE MANAGEMENT MODELS
+// ============================================
+
+model Leave {
+  id              String    @id @default(uuid())
+  employeeId      String    @map("employee_id")
+  leaveType       String    @map("leave_type") // Annual, Sick, Casual, Personal, WFH, Compensatory
+  startDate       DateTime  @map("start_date")
+  endDate         DateTime  @map("end_date")
+  days            Float     // Number of days (can be 0.5 for half day)
+  reason          String?
+  status          String    @default("pending") // pending, approved, rejected
+  rejectionReason String?   @map("rejection_reason")
+  approvedBy      String?   @map("approved_by")
+  approvedAt      DateTime? @map("approved_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  employee  Employee  @relation("EmployeeLeaves", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver  Employee? @relation("ApprovedByEmployee", fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@map("leaves")
+  @@index([employeeId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([leaveType])
+}
+
+// ============================================
+// Leave Balance Model
+// ============================================
+
+model LeaveBalance {
+  id             String   @id @default(uuid())
+  employeeId     String   @map("employee_id")
+  leaveType      String   @map("leave_type") // Annual, Sick, Casual, Personal, WFH, Compensatory
+  totalLeaves    Float    @map("total_leaves") // Total allocated leaves for the year
+  usedLeaves     Float    @default(0) @map("used_leaves") // Leaves already taken
+  remainingLeaves Float   @map("remaining_leaves") // Calculated: totalLeaves - usedLeaves
+  year           Int      @default(2025) // Year for which this balance applies
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  employee Employee @relation("EmployeeLeaveBalances", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, leaveType, year])
+  @@map("leave_balances")
+  @@index([employeeId])
+  @@index([year])
+}
+
+// ============================================
+// PRODUCT & PROJECT MANAGEMENT MODELS
+// ============================================
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  projects Project[]
+
+  @@map("products")
+  @@index([name])
+  @@index([code])
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String   // Client name like "Minnesota", "Wisconsin", "OSAH"
+  code        String   @unique
+  description String?
+  productId   String   @map("product_id")
+  startDate   DateTime? @map("start_date")
+  endDate     DateTime? @map("end_date")
+  status      String   @default("active") // active, on-hold, completed, cancelled
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  members ProjectMember[]
+
+  @@map("projects")
+  @@index([name])
+  @@index([code])
+  @@index([productId])
+  @@index([status])
+}
+
+model ProjectMember {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  employeeId String   @map("employee_id")
+  role       String   @default("member") // project-manager, tech-lead, developer, qa, member
+  startDate  DateTime? @map("start_date")
+  endDate    DateTime? @map("end_date")
+  allocation Int      @default(100) // Percentage allocation (0-100)
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, employeeId])
+  @@map("project_members")
+  @@index([projectId])
+  @@index([employeeId])
+  @@index([role])
+}
+
+// ============================================
+// EVENTS MODEL
+// ============================================
+
+model Event {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  type        String   @default("meeting") // meeting, social, training, launch, holiday
+  date        DateTime
+  time        String?  // e.g., "10:00 AM"
+  endDate     DateTime? @map("end_date")
+  endTime     String?   @map("end_time")
+  location    String?
+  isAllDay    Boolean  @default(false) @map("is_all_day")
+  isActive    Boolean  @default(true) @map("is_active")
+
+  // Creator info
+  createdById String   @map("created_by_id")
+  createdBy   Employee @relation("EventCreator", fields: [createdById], references: [id])
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("events")
+  @@index([date])
+  @@index([type])
+  @@index([createdById])
+}
+
+// ============================================
+// HOLIDAYS MODEL
+// ============================================
+
+model Holiday {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  date        DateTime
+  country     String   // "us" or "india"
+  year        Int
+  isActive    Boolean  @default(true) @map("is_active")
+
+  // Creator info
+  createdById String   @map("created_by_id")
+  createdBy   Employee @relation("HolidayCreator", fields: [createdById], references: [id])
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("holidays")
+  @@unique([date, country])
+  @@index([date])
+  @@index([country])
+  @@index([year])
+  @@index([createdById])
+}
+
+// ============================================
+// POLICIES MODEL
+// ============================================
+
+enum PolicyCategory {
+  HR_EMPLOYEE_MANAGEMENT
+  FINANCE_PROCUREMENT
+  DATA_SECURITY_IT
+  OPERATIONAL_SUPPLY_CHAIN
+  GENERAL
+}
+
+model Policy {
+  id          String         @id @default(uuid())
+  title       String
+  description String?
+  category    PolicyCategory @default(GENERAL)
+  documentUrl String?        @map("document_url") // API path to retrieve document
+  version     String         @default("1.0")
+  isActive    Boolean        @default(true) @map("is_active")
+
+  // Who created this policy
+  createdById String   @map("created_by_id")
+  createdBy   Employee @relation("PolicyCreator", fields: [createdById], references: [id])
+
+  // Timestamps
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("policies")
+  @@index([category])
+  @@index([isActive])
+  @@index([createdById])
+}
+
+// ============================================
+// EMPLOYEE DOCUMENTS MODEL
+// ============================================
+
+enum DocumentCategory {
+  EMPLOYMENT
+  PAYROLL
+}
+
+enum DocumentType {
+  // Employment Documents
+  OFFER_LETTER
+  JOINING_LETTER
+  // Payroll Documents
+  PAYSLIP
+  APPRAISAL_LETTER
+  FORM_16
+}
+
+model EmployeeDocument {
+  id          String           @id @default(uuid())
+  employeeId  String           @map("employee_id")
+  employee    Employee         @relation("EmployeeDocuments", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  category    DocumentCategory
+  documentType DocumentType    @map("document_type")
+  title       String           // e.g., "Payslip - January 2024", "Offer Letter"
+  description String?
+  documentUrl String?          @map("document_url") // Reference to MongoDB document
+
+  // For payslips/form16 - to identify the period
+  month       Int?             // 1-12
+  year        Int?
+
+  // Who uploaded this document
+  uploadedById String          @map("uploaded_by_id")
+  uploadedBy   Employee        @relation("DocumentUploader", fields: [uploadedById], references: [id])
+
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  @@map("employee_documents")
+  @@index([employeeId])
+  @@index([category])
+  @@index([documentType])
+  @@index([year, month])
+  @@index([uploadedById])
+}
+
+// ============================================
+// JOB OPENINGS & REFERRALS
+// ============================================
+
+enum JobStatus {
+  open
+  closed
+  on_hold
+  filled
+}
+
+enum JobType {
+  full_time
+  part_time
+  contract
+  internship
+}
+
+enum ExperienceLevel {
+  entry
+  mid
+  senior
+  lead
+  executive
+}
+
+enum ReferralStatus {
+  // 1. Sourcing & Screening
+  applied          // Initial entry point (Applied/Referred)
+  screening        // Preliminary review by HR
+  shortlisted      // Passed initial screen, ready for hiring manager
+
+  // 2. Interviewing
+  interviewing        // Actively in interview loop
+  interviewed         // Waiting for interviewer feedback
+  interview_cleared   // All interview rounds cleared
+  on_hold             // Candidate is "maybe" or role paused
+
+  // 3. Decision & Closing
+  offer_pending    // Final selection, internal approvals in progress
+  offered          // Offer letter sent
+  accepted         // Candidate signed the offer (deprecated, use offer_accepted)
+  offer_accepted   // Candidate accepted the offer
+  joined           // Candidate completed onboarding, started
+
+  // 4. Terminal Statuses (Archived)
+  rejected         // Company decided not to move forward
+  withdrawn        // Candidate removed themselves
+  offer_revoked    // Company cancelled the offer
+  offer_declined   // Candidate turned down the offer
+}
+
+model JobOpening {
+  id              String          @id @default(uuid())
+  title           String
+  description     String
+  requirements    String
+  responsibilities String?
+  department      String?
+  location        String
+  jobType         JobType         @default(full_time) @map("job_type")
+  experienceLevel ExperienceLevel @default(mid) @map("experience_level")
+  salaryMin       Int?            @map("salary_min")
+  salaryMax       Int?            @map("salary_max")
+  status          JobStatus       @default(open)
+  openings        Int             @default(1)
+  referralBonus   Int?            @map("referral_bonus")
+  closingDate     DateTime?       @map("closing_date")
+
+  // Who posted this job
+  postedById      String          @map("posted_by_id")
+  postedBy        Employee        @relation("JobPoster", fields: [postedById], references: [id])
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  referrals       JobReferral[]
+
+  @@map("job_openings")
+  @@index([status])
+  @@index([department])
+  @@index([postedById])
+  @@index([closingDate])
+}
+
+model JobReferral {
+  id              String          @id @default(uuid())
+  jobOpeningId    String          @map("job_opening_id")
+  jobOpening      JobOpening      @relation(fields: [jobOpeningId], references: [id], onDelete: Cascade)
+
+  // Who referred
+  referredById    String          @map("referred_by_id")
+  referredBy      Employee        @relation("Referrer", fields: [referredById], references: [id])
+
+  // Candidate info
+  candidateName   String          @map("candidate_name")
+  candidateEmail  String          @map("candidate_email")
+  candidatePhone  String?         @map("candidate_phone")
+  experienceYears Int             @default(0) @map("experience_years") // Required: Experience in years
+  resumeUrl       String?         @map("resume_url")
+  notes           String?
+  isSelfApplied   Boolean         @default(false) @map("is_self_applied") // True if candidate applied directly
+
+  status          ReferralStatus  @default(applied)
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  interviews      CandidateInterview[]
+  history         InterviewHistory[]
+  offers          CandidateOffer[]
+
+  @@map("job_referrals")
+  @@unique([jobOpeningId, candidateEmail], name: "unique_candidate_per_job")
+  @@index([jobOpeningId])
+  @@index([referredById])
+  @@index([status])
+  @@index([candidateEmail])
+}
+
+// ============================================
+// INTERVIEW PIPELINE MODELS
+// ============================================
+
+// Status of each interview round
+enum InterviewRoundStatus {
+  pending       // Not yet started
+  scheduled     // Interview scheduled
+  in_progress   // Interview ongoing
+  cleared       // Candidate passed this round
+  rejected      // Candidate failed this round
+  on_hold       // Round put on hold
+  skipped       // Round skipped
+}
+
+// Default interview rounds for job openings
+model InterviewRound {
+  id              String          @id @default(uuid())
+  jobOpeningId    String          @map("job_opening_id")
+
+  name            String          // e.g., "Resume Shortlisting", "Technical Round 1", "HR Round"
+  description     String?
+  roundNumber     Int             @map("round_number") // Order of the round (1, 2, 3...)
+  isRequired      Boolean         @default(true) @map("is_required") // Can this round be skipped?
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  candidateInterviews CandidateInterview[]
+
+  @@map("interview_rounds")
+  @@unique([jobOpeningId, roundNumber])
+  @@index([jobOpeningId])
+}
+
+// Tracks each candidate's interview for each round
+model CandidateInterview {
+  id                String               @id @default(uuid())
+  referralId        String               @map("referral_id")
+  referral          JobReferral          @relation(fields: [referralId], references: [id], onDelete: Cascade)
+
+  roundId           String               @map("round_id")
+  round             InterviewRound       @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  // Interviewer assignment
+  interviewerId     String?              @map("interviewer_id")
+
+  // Interview details
+  scheduledAt       DateTime?            @map("scheduled_at")
+  completedAt       DateTime?            @map("completed_at")
+  status            InterviewRoundStatus @default(pending)
+  feedback          String?              // Interviewer's feedback
+  rating            Int?                 // Rating out of 5
+
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  @@map("candidate_interviews")
+  @@unique([referralId, roundId])
+  @@index([referralId])
+  @@index([roundId])
+  @@index([interviewerId])
+  @@index([status])
+}
+
+// Audit log for interview process history
+model InterviewHistory {
+  id              String          @id @default(uuid())
+  referralId      String          @map("referral_id")
+  referral        JobReferral     @relation(fields: [referralId], references: [id], onDelete: Cascade)
+
+  // Who made the change
+  changedById     String          @map("changed_by_id")
+
+  // What changed
+  action          String          // e.g., "status_change", "interviewer_assigned", "feedback_added", "round_completed"
+  roundNumber     Int?            @map("round_number") // Which round this relates to (if applicable)
+  previousValue   String?         @map("previous_value")
+  newValue        String?         @map("new_value")
+  notes           String?         // Additional context
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  @@map("interview_history")
+  @@index([referralId])
+  @@index([changedById])
+  @@index([createdAt])
+}
+
+// ============================================
+// OFFER MANAGEMENT MODELS
+// ============================================
+
+enum OfferStatus {
+  pending      // Offer sent, waiting for response
+  accepted     // Candidate accepted
+  declined     // Candidate declined
+  revoked      // HR revoked the offer
+  expired      // Validity date passed
+}
+
+enum OfferType {
+  original     // First offer
+  revised      // Revised offer after revocation
+}
+
+model CandidateOffer {
+  id              String        @id @default(uuid())
+  referralId      String        @map("referral_id")
+  referral        JobReferral   @relation(fields: [referralId], references: [id], onDelete: Cascade)
+
+  // Public access token for candidate to view/accept offer
+  publicToken     String        @unique @map("public_token")
+
+  // Offer details
+  offerLetterUrl  String        @map("offer_letter_url") // MongoDB document ID
+  validUntil      DateTime      @map("valid_until")
+  status          OfferStatus   @default(pending)
+  offerType       OfferType     @default(original) @map("offer_type")
+  version         Int           @default(1) // Increment for each new offer
+
+  // Who made the offer
+  createdById     String        @map("created_by_id")
+  createdBy       Employee      @relation("OfferCreator", fields: [createdById], references: [id])
+
+  // Response tracking
+  respondedAt     DateTime?     @map("responded_at")
+  revokedAt       DateTime?     @map("revoked_at")
+  revokedById     String?       @map("revoked_by_id")
+  revokedBy       Employee?     @relation("OfferRevoker", fields: [revokedById], references: [id])
+  revokeReason    String?       @map("revoke_reason")
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@map("candidate_offers")
+  @@index([referralId])
+  @@index([status])
+  @@index([createdById])
+  @@index([publicToken])
+}

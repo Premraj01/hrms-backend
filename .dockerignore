@@ -1,0 +1,53 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Build output
+dist
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files (use AWS secrets/parameter store instead)
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Tests
+coverage
+.nyc_output
+*.spec.ts
+*.test.ts
+test/
+jest.config.js
+
+# Prisma migrations backup
+prisma/migrations/**/migration_lock.toml
+
+# Generated files
+generated/
+
+# Uploads (should be handled by S3 in production)
+uploads/
+
+# Misc
+postman_collection.json
+*.log
+
