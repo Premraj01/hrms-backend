@@ -356,28 +356,54 @@ export class JobOpeningsService {
       );
     }
 
-    // Create CandidateInterview records for each round
-    const interviews = await Promise.all(
-      rounds.map((round) =>
-        this.prisma.candidateInterview.create({
-          data: {
-            referralId,
-            roundId: round.id,
-            status: round.roundNumber === 1 ? 'pending' : 'pending',
-          },
-        })
-      )
-    );
-
-    // Update referral status to screening
-    await this.prisma.jobReferral.update({
-      where: { id: referralId },
-      data: { status: 'screening' },
+    // Check if interview records already exist (prevent duplicates)
+    const existingInterviews = await this.prisma.candidateInterview.findMany({
+      where: { referralId },
     });
 
-    // Log history
-    await this.addInterviewHistory(referralId, changedById, 'process_started', null, null, 'screening', 'Interview process started');
+    if (existingInterviews.length > 0) {
+      this.logger.log(`Interview process already started for referral ${referralId}, returning existing interviews`);
+      return existingInterviews;
+    }
 
+    // Use a transaction to ensure all operations succeed or fail together
+    const interviews = await this.prisma.$transaction(async (tx) => {
+      // Create CandidateInterview records for each round
+      const createdInterviews = await Promise.all(
+        rounds.map((round) =>
+          tx.candidateInterview.create({
+            data: {
+              referralId,
+              roundId: round.id,
+              status: 'pending',
+            },
+          })
+        )
+      );
+
+      // Update referral status to screening
+      await tx.jobReferral.update({
+        where: { id: referralId },
+        data: { status: 'screening' },
+      });
+
+      // Log history
+      await tx.interviewHistory.create({
+        data: {
+          referralId,
+          changedById,
+          action: 'process_started',
+          roundNumber: null,
+          previousValue: null,
+          newValue: 'screening',
+          notes: 'Interview process started',
+        },
+      });
+
+      return createdInterviews;
+    });
+
+    this.logger.log(`Interview process started for referral ${referralId} with ${interviews.length} rounds`);
     return interviews;
   }
 
