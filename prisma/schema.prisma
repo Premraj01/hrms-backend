@@ -228,6 +228,8 @@ model Employee {
   referrals       JobReferral[]    @relation("Referrer")
   createdOffers   CandidateOffer[] @relation("OfferCreator")
   revokedOffers   CandidateOffer[] @relation("OfferRevoker")
+  payrollProfile  PayrollProfile?
+  payrollComponents EmployeePayrollComponent[]
 
   @@map("employees")
   @@index([employeeCode])
@@ -501,6 +503,67 @@ model EmployeeDocument {
   @@index([documentType])
   @@index([year, month])
   @@index([uploadedById])
+}
+
+// ============================================
+// PAYROLL PROFILE (Salary Structure)
+// ============================================
+
+model PayrollProfile {
+  id            String   @id @default(uuid())
+  employeeId    String   @unique @map("employee_id")
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  // Core salary (monthly)
+  basicSalary   Float    @map("basic_salary")
+  netSalary     Float    @map("net_salary") // Computed: basicSalary + SUM(earnings) - SUM(deductions)
+
+  currency      String   @default("INR")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("payroll_profiles")
+  @@index([employeeId])
+}
+
+enum PayrollComponentType {
+  EARNING
+  DEDUCTION
+}
+
+model PayrollComponent {
+  id          String               @id @default(uuid())
+  name        String               @unique
+  type        PayrollComponentType
+  description String?
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  employeeComponents EmployeePayrollComponent[]
+
+  @@map("payroll_components")
+  @@index([type])
+}
+
+model EmployeePayrollComponent {
+  id          String   @id @default(uuid())
+  employeeId  String   @map("employee_id")
+  componentId String   @map("component_id")
+  amount      Float
+  currency    String   @default("INR")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  employee  Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  component PayrollComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, componentId])
+  @@map("employee_payroll_components")
+  @@index([employeeId])
+  @@index([componentId])
 }
 
 // ============================================

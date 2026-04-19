@@ -8,6 +8,16 @@ async function main() {
 
   // Clear existing data (in correct order due to foreign keys)
   console.log('🗑️ Clearing existing data...');
+  // Job pipeline (must be cleared before employees due to FKs on Employee)
+  await prisma.candidateOffer.deleteMany({});
+  await prisma.candidateInterview.deleteMany({});
+  await prisma.interviewHistory.deleteMany({});
+  await prisma.jobReferral.deleteMany({});
+  await prisma.interviewRound.deleteMany({});
+  await prisma.jobOpening.deleteMany({});
+  // Documents and policies (reference Employee via uploadedBy/createdBy without cascade)
+  await prisma.employeeDocument.deleteMany({});
+  await prisma.policy.deleteMany({});
   await prisma.holiday.deleteMany({});
   await prisma.event.deleteMany({});
   await prisma.projectMember.deleteMany({});
@@ -63,6 +73,8 @@ async function main() {
     { name: 'payroll.update', resource: 'payroll', action: 'update', description: 'Update payroll records' },
     { name: 'payroll.delete', resource: 'payroll', action: 'delete', description: 'Delete payroll records' },
     { name: 'payroll.process', resource: 'payroll', action: 'process', description: 'Process payroll' },
+    { name: 'payroll.manage', resource: 'payroll', action: 'manage', description: 'Manage payroll (upload/edit payslips)' },
+    { name: 'payroll.view', resource: 'payroll', action: 'view', description: 'View own payroll records' },
 
     // Leave permissions
     { name: 'leave.create', resource: 'leave', action: 'create', description: 'Create leave requests' },
@@ -206,7 +218,9 @@ async function main() {
     p.name.startsWith('projects.') ||
     p.name.startsWith('products.') ||
     p.name === 'dashboard.view' ||
-    p.name === 'reports.view'
+    p.name === 'reports.view' ||
+    p.name === 'payroll.manage' ||
+    p.name === 'payroll.view'
   );
 
   for (const permission of hrPermissions) {
@@ -236,7 +250,8 @@ async function main() {
     p.name === 'projects.read' ||
     p.name === 'products.read' ||
     p.name === 'dashboard.view' ||
-    p.name === 'reports.view'
+    p.name === 'reports.view' ||
+    p.name === 'payroll.view'
   );
 
   for (const permission of managerPermissions) {
@@ -263,7 +278,8 @@ async function main() {
     p.name === 'leave.create' ||
     p.name === 'leave.read' ||
     p.name === 'projects.read' ||
-    p.name === 'dashboard.view'
+    p.name === 'dashboard.view' ||
+    p.name === 'payroll.view'
   );
 
   for (const permission of employeePermissions) {
@@ -1185,6 +1201,36 @@ async function main() {
   }
 
   console.log('✅ Added holidays');
+
+  // Seed payslip EmployeeDocuments for 3 employees covering the last 3 months of the current year
+  console.log('Creating dummy payslip documents...');
+  const payrollYear = new Date().getFullYear();
+  const payrollEmployees = [shruti, krupali, nikita];
+  const payslipMonths = [1, 2, 3]; // Jan, Feb, Mar of current year
+
+  const monthName = (m: number) =>
+    new Date(payrollYear, m - 1).toLocaleString('default', { month: 'long' });
+
+  let payslipsCreated = 0;
+  for (const emp of payrollEmployees) {
+    for (const month of payslipMonths) {
+      await prisma.employeeDocument.create({
+        data: {
+          employeeId: emp.id,
+          category: 'PAYROLL',
+          documentType: 'PAYSLIP',
+          title: `Payslip - ${monthName(month)} ${payrollYear}`,
+          description: `Monthly payslip for ${monthName(month)} ${payrollYear}`,
+          month,
+          year: payrollYear,
+          uploadedById: krupali.id,
+        },
+      });
+      payslipsCreated++;
+    }
+  }
+
+  console.log(`✅ Created ${payslipsCreated} dummy payslip documents`);
 
   console.log('🎉 Database seeding completed successfully!');
 }

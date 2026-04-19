@@ -22,6 +22,7 @@ import { ProfilePhotosModule } from './modules/profile-photos/profile-photos.mod
 import { PoliciesModule } from './modules/policies/policies.module';
 import { JobOpeningsModule } from './modules/job-openings/job-openings.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { PayrollModule } from './modules/payroll/payroll.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
@@ -59,6 +60,7 @@ import { AuditMiddleware } from './common/middleware/audit.middleware';
     PoliciesModule,
     DocumentsModule,
     JobOpeningsModule,
+    PayrollModule,
   ],
   controllers: [AppController],
   providers: [

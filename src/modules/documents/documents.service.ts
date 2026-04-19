@@ -7,6 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { DocumentFile } from './schemas/document-file.schema';
+import { Payslip, PayslipDocument } from '../payroll/schemas/payslip.schema';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { DocumentCategory, DocumentType } from '@prisma/client';
@@ -17,6 +18,8 @@ export class DocumentsService {
     private prisma: PrismaService,
     @InjectModel(DocumentFile.name)
     private documentFileModel: Model<DocumentFile>,
+    @InjectModel(Payslip.name)
+    private payslipModel: Model<PayslipDocument>,
   ) {}
 
   async create(
@@ -191,18 +194,47 @@ export class DocumentsService {
       throw new NotFoundException('No file attached to this document');
     }
 
+    const isPayslip =
+      document.category === DocumentCategory.PAYROLL &&
+      document.documentType === DocumentType.PAYSLIP;
+
+    // For payslips, always derive the filename from the employee + period so
+    // previously-generated files are renamed consistently on download.
+    const payslipFilename =
+      isPayslip && document.employee && document.month && document.year
+        ? buildPayslipFilename(
+            document.employee.firstName,
+            document.employee.lastName,
+            document.month,
+            document.year,
+          )
+        : null;
+
     const file = await this.documentFileModel.findOne({ employeeDocumentId: id });
 
-    if (!file) {
-      throw new NotFoundException('File not found');
+    if (file) {
+      return {
+        filename: payslipFilename ?? file.filename,
+        mimetype: file.mimetype,
+        data: file.data,
+        size: file.size,
+      };
     }
 
-    return {
-      filename: file.filename,
-      mimetype: file.mimetype,
-      data: file.data,
-      size: file.size,
-    };
+    // Fallback: payslips uploaded via PayrollService are stored in the Payslip collection
+    if (isPayslip) {
+      const payslip = await this.payslipModel.findOne({ employeeDocumentId: id });
+      if (payslip) {
+        return {
+          filename: payslipFilename ?? payslip.filename,
+          mimetype: payslip.mimetype,
+          data: payslip.data,
+          size: payslip.size,
+        };
+      }
+    }
+
+    throw new NotFoundException('File not found');
   }
 
   async getDocumentTypes() {
@@ -222,5 +254,19 @@ export class DocumentsService {
       },
     };
   }
+}
+
+function buildPayslipFilename(
+  firstName: string,
+  lastName: string,
+  month: number,
+  year: number,
+): string {
+  const monthLabel = new Date(year, month - 1).toLocaleString('default', {
+    month: 'long',
+  });
+  const sanitize = (s: string) =>
+    s.trim().replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+  return `${sanitize(firstName)}_${sanitize(lastName)}_${monthLabel}_${year}.pdf`;
 }
 
